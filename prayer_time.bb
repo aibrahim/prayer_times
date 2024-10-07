@@ -12,8 +12,7 @@
   "Return current hour and mins as a tuple."
   []
   (let [now (java.time.LocalTime/now)]
-    [(.getHour now)
-     (.getMinute now)]))
+    [(.getHour now) (.getMinute now)]))
 
 (defn parse-hour-mins
   "Take `h-mm-str` as hour-min string with PM and AM at the end, and
@@ -23,16 +22,11 @@
   [h-mm-str]
   (let [formatter (java.time.format.DateTimeFormatter/ofPattern "h:mm a")
         parsed-time (java.time.LocalTime/parse h-mm-str formatter)]
-    [(.getHour parsed-time)
-     (.getMinute parsed-time)]))
+    [(.getHour parsed-time) (.getMinute parsed-time)]))
 
 (defn get-prayers-times
   [town year month day]
-  (let [now (java.time.ZonedDateTime/now)
-        year (.getYear now)
-        month (.getMonthValue now)
-        day (.getDayOfMonth now)
-        url (format "https://as-m247-prod.azurewebsites.net/api/timetable/getbytown/%s/%s/%s/%s?includeFullDetails=true" town year month day)]
+  (let [url (format "https://as-m247-prod.azurewebsites.net/api/timetable/getbytown/%s/%s/%s/%s?includeFullDetails=true" town year month day)]
     (-> (http/get url)
       :body
       json/read-str
@@ -46,21 +40,15 @@
 (defn get-current-prayers-times
   "Return current prayers times."
   [town]
-  (let [now (java.time.ZonedDateTime/now)
-        year (.getYear now)
-        month (.getMonthValue now)
-        day (.getDayOfMonth now)]
-    (get-prayers-times town year month day)))
+  (let [now (java.time.ZonedDateTime/now)]
+    (get-prayers-times town (.getYear now) (.getMonthValue now) (.getDayOfMonth now))))
 
 (defn get-tomorrow-prayers-times
   [town]
-  (let [tomorrow (.plusDays (java.time.ZonedDateTime/now) 1)
-        year (.getYear tomorrow)
-        month (.getMonthValue tomorrow)
-        day (.getDayOfMonth tomorrow)]
-    (get-prayers-times town year month day)))
+  (let [tomorrow (.plusDays (java.time.ZonedDateTime/now) 1)]
+    (get-prayers-times town (.getYear tomorrow) (.getMonthValue tomorrow) (.getDayOfMonth tomorrow))))
 
-(defn parse-all-prayers-times
+(defn parse-prayers-times
   [prayers-times]
   (reduce-kv
     (fn [res k v]
@@ -90,7 +78,7 @@
   [town]
   (let [current-prayers (get-current-prayers-times town)
         [next-prayer remaining-time] (-> current-prayers
-                                       (parse-all-prayers-times)
+                                       (parse-prayers-times)
                                        (get-next-prayer-same-day))]
     (if next-prayer
       (let [[beg-or-jam prayer] (-> next-prayer
@@ -100,8 +88,7 @@
          :beg-or-jam     beg-or-jam
          :prayer-time    (get current-prayers next-prayer)
          :remaining-time remaining-time})
-      (let [tomorrow-prayers (-> (get-tomorrow-prayers-times town)
-                               (select-keys [:begFajr]))]
+      (let [tomorrow-prayers (get-tomorrow-prayers-times town)]
         {:prayer-name    :fajr
          :beg-or-jam     :beg
          :prayer-time    (get tomorrow-prayers :begFajr)}))))
