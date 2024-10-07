@@ -2,7 +2,11 @@
 
 (ns prayer-times
   (:require [babashka.http-client :as http]
-            [babashka.json :as json]))
+            [babashka.json :as json]
+            [camel-snake-kebab.core :as csk]
+            [camel-snake-kebab.extras :as cske]
+            [clojure.string :as str]
+            [clojure.java.shell :refer [sh]]))
 
 (defn get-current-hour-mins
   "Return current hour and mins as a tuple."
@@ -65,33 +69,61 @@
         (assoc res k (parse-hour-mins (str v " " meridian)))))
     {} prayers-times))
 
-(defn get-diffs
-  [parsed-prayers-times]
-  (let [[current-hour current-mins] (get-current-hour-mins)]
-    (->> parsed-prayers-times
-      (map (fn [[prayer [hour mins]]]
-             [prayer [(- hour current-hour)
-                      (- mins current-mins)]])))))
+(defn time-diff
+  "Calculate the time difference in hours and minutes between the current time and a target time."
+  [[target-hour target-min] [current-hour current-min]]
+  [(- target-hour current-hour) (- target-min current-min)])
+
+(defn get-next-prayer-same-day
+  "Return the next prayer time at the same day by comparing current time with parsed prayer times."
+  [parsed-prayers]
+  (let [current-time (get-current-hour-mins)]
+    (->> parsed-prayers
+      (map (fn [[prayer-time parsed-time]]
+             [prayer-time (time-diff parsed-time current-time)]))
+      (filter (fn [[_ [hour diff]]]
+                (or (> hour 0) (and (= hour 0) (> diff 0)))))
+      (sort-by (comp first second)) ;; Sort by the nearest positive time difference
+      first)))
 
 (defn get-next-prayer
-  [diffs]
-  (let [prayer (->> diffs
-                 (filter (comp (partial < 0) first last))
-                 (sort-by (comp first last))
-                 first)]
-    (if (nil? prayer)
-      (-> (get-tomorrow-prayers-times "cambridge")
-        (parse-all-prayers-times)
-        (select-keys [:begFajr])))))
+  [town]
+  (let [current-prayers (get-current-prayers-times town)
+        [next-prayer remaining-time] (-> current-prayers
+                                       (parse-all-prayers-times)
+                                       (get-next-prayer-same-day))]
+    (if next-prayer
+      (let [[beg-or-jam prayer] (-> next-prayer
+                                  csk/->kebab-case-string
+                                  (str/split #"-"))]
+        {:prayer-name    prayer
+         :beg-or-jam     beg-or-jam
+         :prayer-time    (get current-prayers next-prayer)
+         :remaining-time remaining-time})
+      (let [tomorrow-prayers (-> (get-tomorrow-prayers-times town)
+                               (select-keys [:begFajr]))]
+        {:prayer-name    :fajr
+         :beg-or-jam     :beg
+         :prayer-time    (get tomorrow-prayers :begFajr)}))))
 
+(defn notify-message
+  [title body]
+  (let [message (format "display notification \"%s\" with title \"%s\""
+                  body title)]
+    (sh "osascript" "-e" message)))
+
+(defn notify-next-prayer
+  [town]
+  (let [{:keys [prayer-name prayer-time]} (get-next-prayer "cambridge")]
+    (notify-message "🕌 Next Prayer" (str prayer-name " at " prayer-time))))
 
 
 (comment
 
-  (-> (get-current-prayers-times "cambridge")
-    (parse-all-prayers-times)
-    (get-diffs)
-    (get-next-prayer)
-    )
+
+  (notify-next-prayer "cambridge")
+
+
+  
   
   ,)
